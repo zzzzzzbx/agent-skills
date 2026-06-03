@@ -55,6 +55,7 @@ from typing import Any
 
 
 TAPD_API_BASE = "https://api.tapd.cn"
+DEFAULT_COMMENT_ENTRY_TYPE = "bug|bug_remark"
 
 
 class TapdError(RuntimeError):
@@ -274,6 +275,52 @@ def _normalize_bug(item: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _normalize_comment(item: dict[str, Any]) -> dict[str, Any]:
+    comment = item.get("Comment", item)
+
+    wanted_fields = [
+        "id",
+        "title",
+        "description",
+        "author",
+        "entry_type",
+        "entry_id",
+        "created",
+        "modified",
+        "workspace_id",
+        "root_id",
+        "reply_id",
+    ]
+
+    return {
+        field: comment.get(field)
+        for field in wanted_fields
+        if field in comment
+    }
+
+
+def _fetch_comments(
+    *,
+    workspace_id: str,
+    bug_id: str,
+    entry_type: str,
+    limit: int,
+    page: int,
+) -> list[dict[str, Any]]:
+    data = _request_json(
+        "/comments",
+        {
+            "workspace_id": workspace_id,
+            "entry_type": entry_type,
+            "entry_id": bug_id,
+            "limit": min(limit, 200),
+            "page": page,
+        },
+    )
+
+    return [_normalize_comment(item) for item in data.get("data", [])]
+
+
 def list_bugs(args: argparse.Namespace) -> int:
     workspace_id = args.workspace_id or os.getenv("TAPD_WORKSPACE_ID")
 
@@ -299,6 +346,25 @@ def list_bugs(args: argparse.Namespace) -> int:
 
     data = _request_json("/bugs", params)
     bugs = [_normalize_bug(item) for item in data.get("data", [])]
+
+    if args.with_comments:
+        for bug in bugs:
+            bug_id = bug.get("id")
+
+            if not bug_id:
+                bug["comments_count"] = 0
+                bug["comments"] = []
+                continue
+
+            comments = _fetch_comments(
+                workspace_id=workspace_id,
+                bug_id=str(bug_id),
+                entry_type=args.comment_entry_type,
+                limit=args.comments_limit,
+                page=args.comments_page,
+            )
+            bug["comments_count"] = len(comments)
+            bug["comments"] = comments
 
     print(
         json.dumps(
@@ -343,7 +409,57 @@ def get_bug(args: argparse.Namespace) -> int:
             f"in workspace_id={workspace_id}."
         )
 
-    print(json.dumps(bugs[0], ensure_ascii=False, indent=2))
+    bug = bugs[0]
+
+    if args.with_comments:
+        comments = _fetch_comments(
+            workspace_id=workspace_id,
+            bug_id=args.bug_id,
+            entry_type=args.comment_entry_type,
+            limit=args.comments_limit,
+            page=args.comments_page,
+        )
+        bug["comments_count"] = len(comments)
+        bug["comments"] = comments
+
+    print(json.dumps(bug, ensure_ascii=False, indent=2))
+
+    return 0
+
+
+def get_comments(args: argparse.Namespace) -> int:
+    workspace_id = args.workspace_id or os.getenv("TAPD_WORKSPACE_ID")
+
+    if not workspace_id:
+        raise TapdError(
+            "Missing workspace id. Pass --workspace-id or set TAPD_WORKSPACE_ID "
+            "in the project .env file."
+        )
+
+    if not args.bug_id:
+        raise TapdError("Missing --bug-id.")
+
+    comments = _fetch_comments(
+        workspace_id=workspace_id,
+        bug_id=args.bug_id,
+        entry_type=args.comment_entry_type,
+        limit=args.limit,
+        page=args.page,
+    )
+
+    print(
+        json.dumps(
+            {
+                "workspace_id": workspace_id,
+                "bug_id": args.bug_id,
+                "entry_type": args.comment_entry_type,
+                "count": len(comments),
+                "comments": comments,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
     return 0
 
@@ -418,6 +534,14 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--page", type=int, default=1)
     list_parser.add_argument("--order", default="modified desc")
     list_parser.add_argument(
+        "--with-comments",
+        action="store_true",
+        help="Also fetch comments for each returned bug.",
+    )
+    list_parser.add_argument("--comments-limit", type=int, default=30)
+    list_parser.add_argument("--comments-page", type=int, default=1)
+    list_parser.add_argument("--comment-entry-type", default=DEFAULT_COMMENT_ENTRY_TYPE)
+    list_parser.add_argument(
         "--fields",
         default=(
             "id,workspace_id,title,description,status,priority,priority_label,"
@@ -431,7 +555,26 @@ def build_parser() -> argparse.ArgumentParser:
     get_parser = subparsers.add_parser("get", help="Get one TAPD bug by id.")
     get_parser.add_argument("--workspace-id", default=None)
     get_parser.add_argument("--bug-id", required=True)
+    get_parser.add_argument(
+        "--with-comments",
+        action="store_true",
+        help="Also fetch comments for this bug.",
+    )
+    get_parser.add_argument("--comments-limit", type=int, default=200)
+    get_parser.add_argument("--comments-page", type=int, default=1)
+    get_parser.add_argument("--comment-entry-type", default=DEFAULT_COMMENT_ENTRY_TYPE)
     get_parser.set_defaults(func=get_bug)
+
+    comments_parser = subparsers.add_parser(
+        "comments",
+        help="List comments for one TAPD bug.",
+    )
+    comments_parser.add_argument("--workspace-id", default=None)
+    comments_parser.add_argument("--bug-id", required=True)
+    comments_parser.add_argument("--limit", type=int, default=200)
+    comments_parser.add_argument("--page", type=int, default=1)
+    comments_parser.add_argument("--comment-entry-type", default=DEFAULT_COMMENT_ENTRY_TYPE)
+    comments_parser.set_defaults(func=get_comments)
 
     image_parser = subparsers.add_parser(
         "image",

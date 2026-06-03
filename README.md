@@ -28,7 +28,8 @@ Run the TAPD helper directly:
 
 ```bash
 npx @piggyjoe/agent-skills tapd-bug-autofix list --limit 20
-npx @piggyjoe/agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>"
+npx @piggyjoe/agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>" --with-comments
+npx @piggyjoe/agent-skills tapd-bug-autofix comments --bug-id "<TAPD_BUG_ID>"
 npx @piggyjoe/agent-skills tapd-bug-autofix image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
 npx @piggyjoe/agent-skills tapd-bug-autofix attachment --attachment-id "<ATTACHMENT_ID>"
 ```

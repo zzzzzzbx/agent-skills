@@ -42,7 +42,8 @@ Prefer the npm CLI when available:
 
 ```bash
 npx @piggyjoe/agent-skills tapd-bug-autofix list --limit 20
-npx @piggyjoe/agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>"
+npx @piggyjoe/agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>" --with-comments
+npx @piggyjoe/agent-skills tapd-bug-autofix comments --bug-id "<TAPD_BUG_ID>"
 npx @piggyjoe/agent-skills tapd-bug-autofix image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
 npx @piggyjoe/agent-skills tapd-bug-autofix attachment --attachment-id "<ATTACHMENT_ID>"
 ```
@@ -51,7 +52,8 @@ If the skill has already been installed into the project, the Python helper can 
 
 ```bash
 python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py list --limit 20
-python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py get --bug-id "<TAPD_BUG_ID>"
+python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py get --bug-id "<TAPD_BUG_ID>" --with-comments
+python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py comments --bug-id "<TAPD_BUG_ID>"
 python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
 python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py attachment --attachment-id "<ATTACHMENT_ID>"
 ```
@@ -60,6 +62,7 @@ Useful filters for `list`:
 
 ```bash
 npx @piggyjoe/agent-skills tapd-bug-autofix list --status "new|in_progress|reopened" --limit 20
+npx @piggyjoe/agent-skills tapd-bug-autofix list --status "new|in_progress|reopened" --with-comments --comments-limit 20 --limit 10
 npx @piggyjoe/agent-skills tapd-bug-autofix list --owner "zhangsan" --limit 10
 npx @piggyjoe/agent-skills tapd-bug-autofix list --title "login failed" --limit 10
 npx @piggyjoe/agent-skills tapd-bug-autofix list --severity "fatal" --limit 10
@@ -70,6 +73,7 @@ npx @piggyjoe/agent-skills tapd-bug-autofix list --module "checkout" --limit 10
 The helper calls these TAPD APIs:
 
 - Bugs: `GET https://api.tapd.cn/bugs`
+- Comments: `GET https://api.tapd.cn/comments` with `entry_type=bug|bug_remark` and `entry_id=<bug_id>`
 - Inline image download link: `GET https://api.tapd.cn/files/get_image`
 - Attachment download link: `GET https://api.tapd.cn/attachments/down`
 
@@ -79,8 +83,8 @@ For inline TAPD images, pass the image path or full image URL to `image`. For at
 
 For each selected bug:
 
-1. Read the bug fields: id, title, description, status, priority, priority_label, severity, module, current_owner, reporter, version_report, version_test, version_fix, created, modified.
-2. Extract inline image paths, image URLs, and attachment IDs from the description or attachment fields.
+1. Read the bug fields and comments. Prefer `get --bug-id "<id>" --with-comments` for a selected bug, because important reproduction details may live in comments.
+2. Extract inline image paths, image URLs, and attachment IDs from the bug description and comments.
 3. Fetch temporary download URLs with `image` or `attachment`, then inspect screenshots or files before making assumptions.
 4. Convert the bug into a repair hypothesis: wrong behavior, expected behavior, likely files, reproduction signal, and missing evidence.
 5. Search the repository for related code using title keywords, module names, routes, API names, error messages, stack traces, UI labels, field names, and screenshot text.

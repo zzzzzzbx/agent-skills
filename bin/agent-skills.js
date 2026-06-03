@@ -8,7 +8,7 @@ const { spawnSync } = require("node:child_process");
 const packageRoot = path.resolve(__dirname, "..");
 const packageJson = require(path.join(packageRoot, "package.json"));
 const skillsRoot = path.join(packageRoot, ".agents", "skills");
-const tapdCommands = new Set(["list", "get", "image", "attachment"]);
+const tapdCommands = new Set(["list", "get", "comments", "image", "attachment"]);
 
 main(process.argv.slice(2));
 
@@ -444,6 +444,7 @@ Usage:
 TAPD shortcuts:
   agent-skills tapd-bug-autofix list [TAPD options]
   agent-skills tapd-bug-autofix get --bug-id <id>
+  agent-skills tapd-bug-autofix comments --bug-id <id>
   agent-skills tapd-bug-autofix image --image-path <path-or-url>
   agent-skills tapd-bug-autofix attachment --attachment-id <id>
 
@@ -460,13 +461,15 @@ function printTapdHelp(commandPrefix) {
 
 Usage:
   ${commandPrefix} list [TAPD options]
-  ${commandPrefix} get --bug-id <id> [--workspace-id <id>]
+  ${commandPrefix} list --with-comments [TAPD options]
+  ${commandPrefix} get --bug-id <id> [--with-comments] [--workspace-id <id>]
+  ${commandPrefix} comments --bug-id <id> [--workspace-id <id>]
   ${commandPrefix} image --image-path <path-or-url> [--workspace-id <id>]
   ${commandPrefix} attachment --attachment-id <id> [--workspace-id <id>]
 
 Examples:
-  ${commandPrefix} list --status "new|in_progress|reopened" --limit 20
-  ${commandPrefix} get --bug-id 1010158231500628817
+  ${commandPrefix} list --status "new|in_progress|reopened" --with-comments --limit 20
+  ${commandPrefix} get --bug-id 1010158231500628817 --with-comments
 `);
 }
 
