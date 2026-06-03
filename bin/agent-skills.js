@@ -448,10 +448,10 @@ TAPD shortcuts:
   agent-skills tapd-bug-autofix attachment --attachment-id <id>
 
 Examples:
-  npx @zzzzzzbx/agent-skills list
-  npx @zzzzzzbx/agent-skills install tapd-bug-autofix
-  npx @zzzzzzbx/agent-skills update all
-  npx @zzzzzzbx/agent-skills tapd-bug-autofix list --limit 20
+  npx @piggyjoe/agent-skills list
+  npx @piggyjoe/agent-skills install tapd-bug-autofix
+  npx @piggyjoe/agent-skills update all
+  npx @piggyjoe/agent-skills tapd-bug-autofix list --limit 20
 `);
 }
 

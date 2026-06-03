@@ -7,37 +7,37 @@ Packaged Codex agent skills with one npm CLI for installation, updates, and help
 List packaged skills:
 
 ```bash
-npx @zzzzzzbx/agent-skills list
+npx @piggyjoe/agent-skills list
 ```
 
 Install or update one skill in the current project:
 
 ```bash
-npx @zzzzzzbx/agent-skills install tapd-bug-autofix
-npx @zzzzzzbx/agent-skills update tapd-bug-autofix
+npx @piggyjoe/agent-skills install tapd-bug-autofix
+npx @piggyjoe/agent-skills update tapd-bug-autofix
 ```
 
 Install or update every packaged skill:
 
 ```bash
-npx @zzzzzzbx/agent-skills install all
-npx @zzzzzzbx/agent-skills update all
+npx @piggyjoe/agent-skills install all
+npx @piggyjoe/agent-skills update all
 ```
 
 Run the TAPD helper directly:
 
 ```bash
-npx @zzzzzzbx/agent-skills tapd-bug-autofix list --limit 20
-npx @zzzzzzbx/agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>"
-npx @zzzzzzbx/agent-skills tapd-bug-autofix image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
-npx @zzzzzzbx/agent-skills tapd-bug-autofix attachment --attachment-id "<ATTACHMENT_ID>"
+npx @piggyjoe/agent-skills tapd-bug-autofix list --limit 20
+npx @piggyjoe/agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>"
+npx @piggyjoe/agent-skills tapd-bug-autofix image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
+npx @piggyjoe/agent-skills tapd-bug-autofix attachment --attachment-id "<ATTACHMENT_ID>"
 ```
 
-The old single-skill binaries are kept as compatibility aliases after installing the package. With `npx`, use `-p @zzzzzzbx/agent-skills` when calling an alias:
+The old single-skill binaries are kept as compatibility aliases after installing the package. With `npx`, use `-p @piggyjoe/agent-skills` when calling an alias:
 
 ```bash
-npx -p @zzzzzzbx/agent-skills tapd-bug-autofix list --limit 20
-npx -p @zzzzzzbx/agent-skills tapd-bug-autofix install
+npx -p @piggyjoe/agent-skills tapd-bug-autofix list --limit 20
+npx -p @piggyjoe/agent-skills tapd-bug-autofix install
 ```
 
 ## Skills
