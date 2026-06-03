@@ -41,10 +41,10 @@ Never hard-code TAPD credentials into source files, commits, logs, tests, or doc
 Prefer the npm CLI when available:
 
 ```bash
-npx agent-skills tapd-bug-autofix list --limit 20
-npx agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>"
-npx agent-skills tapd-bug-autofix image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
-npx agent-skills tapd-bug-autofix attachment --attachment-id "<ATTACHMENT_ID>"
+npx @zzzzzzbx/agent-skills tapd-bug-autofix list --limit 20
+npx @zzzzzzbx/agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>"
+npx @zzzzzzbx/agent-skills tapd-bug-autofix image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
+npx @zzzzzzbx/agent-skills tapd-bug-autofix attachment --attachment-id "<ATTACHMENT_ID>"
 ```
 
 If the skill has already been installed into the project, the Python helper can also be run directly:
@@ -59,12 +59,12 @@ python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py attachment --attachm
 Useful filters for `list`:
 
 ```bash
-npx agent-skills tapd-bug-autofix list --status "new|in_progress|reopened" --limit 20
-npx agent-skills tapd-bug-autofix list --owner "zhangsan" --limit 10
-npx agent-skills tapd-bug-autofix list --title "login failed" --limit 10
-npx agent-skills tapd-bug-autofix list --severity "fatal" --limit 10
-npx agent-skills tapd-bug-autofix list --priority "high" --limit 10
-npx agent-skills tapd-bug-autofix list --module "checkout" --limit 10
+npx @zzzzzzbx/agent-skills tapd-bug-autofix list --status "new|in_progress|reopened" --limit 20
+npx @zzzzzzbx/agent-skills tapd-bug-autofix list --owner "zhangsan" --limit 10
+npx @zzzzzzbx/agent-skills tapd-bug-autofix list --title "login failed" --limit 10
+npx @zzzzzzbx/agent-skills tapd-bug-autofix list --severity "fatal" --limit 10
+npx @zzzzzzbx/agent-skills tapd-bug-autofix list --priority "high" --limit 10
+npx @zzzzzzbx/agent-skills tapd-bug-autofix list --module "checkout" --limit 10
 ```
 
 The helper calls these TAPD APIs:
