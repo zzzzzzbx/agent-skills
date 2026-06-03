@@ -1,0 +1,29 @@
+{
+  "name": "agent-skills",
+  "version": "0.1.0",
+  "description": "Install and run packaged Codex agent skills.",
+  "type": "commonjs",
+  "bin": {
+    "agent-skills": "bin/agent-skills.js",
+    "tapd-bug-autofix": "bin/tapd-bug-autofix.js",
+    "tapd-bugs": "bin/tapd-bug-autofix.js"
+  },
+  "files": [
+    "bin/",
+    ".agents/skills/"
+  ],
+  "scripts": {
+    "check": "node bin/agent-skills.js --help",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "codex",
+    "skills",
+    "tapd",
+    "bugs"
+  ],
+  "license": "MIT"
+}
