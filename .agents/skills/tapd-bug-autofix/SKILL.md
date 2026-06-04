@@ -1,13 +1,13 @@
 ---
 name: tapd-bug-autofix
-description: Use when Codex needs to read bugs or defects from TAPD, fetch TAPD screenshots or attachments, analyze bug details, locate related code, implement fixes, run validation, and report results. Trigger on TAPD, bug, defect, workspace_id, TAPD_WORKSPACE_ID, screenshot, attachment, image, read TAPD bugs, autonomous bug fix, and Chinese requests about TAPD defect repair.
+description: Use when Codex needs to read bugs or defects from TAPD, fetch TAPD comments, screenshots, or attachments, update TAPD defect status, follow a project TAPD bug workflow, analyze bug details, locate related code, implement fixes, run validation, and report results. Trigger on TAPD, bug, defect, workspace_id, TAPD_WORKSPACE_ID, screenshot, attachment, image, comments, status update, workflow, read TAPD bugs, autonomous bug fix, and Chinese requests about TAPD defect repair or status transitions.
 ---
 
 # TAPD Bug Autofix
 
-Use this skill to read TAPD bugs from the current project, inspect descriptions, screenshots, and attachments, then fix matching issues in the repository.
+Use this skill to read TAPD bugs from the current project, inspect descriptions, comments, screenshots, and attachments, then fix matching issues in the repository.
 
-The helper is read-only by default. Do not update TAPD bug status, assignees, or comments unless the user explicitly asks for write-back behavior.
+The helper can update TAPD bug status. Only write status changes when the user explicitly asks, or when the project workflow config says to do so.
 
 ## Credentials
 
@@ -44,6 +44,10 @@ Prefer the npm CLI when available:
 npx @piggyjoe/agent-skills tapd-bug-autofix list --limit 20
 npx @piggyjoe/agent-skills tapd-bug-autofix get --bug-id "<TAPD_BUG_ID>" --with-comments
 npx @piggyjoe/agent-skills tapd-bug-autofix comments --bug-id "<TAPD_BUG_ID>"
+npx @piggyjoe/agent-skills tapd-bug-autofix workflow init
+npx @piggyjoe/agent-skills tapd-bug-autofix list --workflow --limit 20
+npx @piggyjoe/agent-skills tapd-bug-autofix transition --bug-id "<TAPD_BUG_ID>" --to accept
+npx @piggyjoe/agent-skills tapd-bug-autofix status --bug-id "<TAPD_BUG_ID>" --v-status "待发布"
 npx @piggyjoe/agent-skills tapd-bug-autofix image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
 npx @piggyjoe/agent-skills tapd-bug-autofix attachment --attachment-id "<ATTACHMENT_ID>"
 ```
@@ -54,6 +58,10 @@ If the skill has already been installed into the project, the Python helper can 
 python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py list --limit 20
 python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py get --bug-id "<TAPD_BUG_ID>" --with-comments
 python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py comments --bug-id "<TAPD_BUG_ID>"
+python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py workflow init
+python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py list --workflow --limit 20
+python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py transition --bug-id "<TAPD_BUG_ID>" --to accept
+python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py status --bug-id "<TAPD_BUG_ID>" --v-status "待发布"
 python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py image --image-path "<IMAGE_PATH_OR_IMAGE_URL>"
 python .agents/skills/tapd-bug-autofix/scripts/tapd_bugs.py attachment --attachment-id "<ATTACHMENT_ID>"
 ```
@@ -74,23 +82,51 @@ The helper calls these TAPD APIs:
 
 - Bugs: `GET https://api.tapd.cn/bugs`
 - Comments: `GET https://api.tapd.cn/comments` with `entry_type=bug|bug_remark` and `entry_id=<bug_id>`
+- Status update: `POST https://api.tapd.cn/bugs` with `id`, `workspace_id`, and `status` or `v_status`
 - Inline image download link: `GET https://api.tapd.cn/files/get_image`
 - Attachment download link: `GET https://api.tapd.cn/attachments/down`
 
 For inline TAPD images, pass the image path or full image URL to `image`. For attachment IDs, pass the ID to `attachment`. The returned `data.Attachment.download_url` is temporary; use it immediately and do not commit it.
 
+## Project workflow
+
+If the project has `.agents/tapd-bug-autofix.workflow.json`, all agents should follow it unless the user overrides the workflow in the current task.
+
+Create the config from the project root:
+
+```bash
+npx @piggyjoe/agent-skills tapd-bug-autofix workflow init
+```
+
+Default flow:
+
+- Read bugs with status `新|重新打开`.
+- Include bug comments.
+- After taking a bug, transition it with `transition --bug-id "<id>" --to accept`, which sets `v_status` to `接收/处理`.
+- After the user accepts the fix, transition it with `--to ready_for_release`, which sets `v_status` to `待发布`.
+- After release, the user may transition it with `--to resolved`, which sets `v_status` to `已解决`.
+
+Read bugs using configured workflow defaults:
+
+```bash
+npx @piggyjoe/agent-skills tapd-bug-autofix list --workflow --limit 20
+```
+
+Before changing status, make sure the workflow matches the user's current request. Do not transition to `ready_for_release` or `resolved` unless the user explicitly says the fix has been accepted or released.
+
 ## Repair Workflow
 
 For each selected bug:
 
-1. Read the bug fields and comments. Prefer `get --bug-id "<id>" --with-comments` for a selected bug, because important reproduction details may live in comments.
+1. Read the bug fields and comments. Prefer `list --workflow` for queue intake and `get --bug-id "<id>" --with-comments` for a selected bug, because important reproduction details may live in comments.
 2. Extract inline image paths, image URLs, and attachment IDs from the bug description and comments.
-3. Fetch temporary download URLs with `image` or `attachment`, then inspect screenshots or files before making assumptions.
-4. Convert the bug into a repair hypothesis: wrong behavior, expected behavior, likely files, reproduction signal, and missing evidence.
-5. Search the repository for related code using title keywords, module names, routes, API names, error messages, stack traces, UI labels, field names, and screenshot text.
-6. Inspect surrounding code before editing. Prefer the smallest safe fix and preserve project style.
-7. Add or update targeted tests when practical.
-8. Validate with targeted tests first, then lint/typecheck/build when available and reasonable.
+3. If the project workflow instructs the agent to take ownership, transition the bug to the configured accept state before editing.
+4. Fetch temporary download URLs with `image` or `attachment`, then inspect screenshots or files before making assumptions.
+5. Convert the bug into a repair hypothesis: wrong behavior, expected behavior, likely files, reproduction signal, and missing evidence.
+6. Search the repository for related code using title keywords, module names, routes, API names, error messages, stack traces, UI labels, field names, and screenshot text.
+7. Inspect surrounding code before editing. Prefer the smallest safe fix and preserve project style.
+8. Add or update targeted tests when practical.
+9. Validate with targeted tests first, then lint/typecheck/build when available and reasonable.
 
 When multiple bugs are returned, sort by priority/severity first, then modified time. Fix one bug at a time unless several bugs clearly share the same root cause.
 

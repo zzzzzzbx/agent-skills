@@ -56,6 +56,31 @@ from typing import Any
 
 TAPD_API_BASE = "https://api.tapd.cn"
 DEFAULT_COMMENT_ENTRY_TYPE = "bug|bug_remark"
+WORKFLOW_CONFIG_RELATIVE_PATH = Path(".agents") / "tapd-bug-autofix.workflow.json"
+DEFAULT_WORKFLOW_CONFIG = {
+    "name": "tapd-bug-autofix-default",
+    "read": {
+        "v_status": "新|重新打开",
+        "with_comments": True,
+        "comments_limit": 30,
+    },
+    "write": {
+        "enabled": True,
+        "status_field": "v_status",
+        "current_user_env": "TAPD_CURRENT_USER",
+    },
+    "transitions": {
+        "accept": {
+            "v_status": "接收/处理",
+        },
+        "ready_for_release": {
+            "v_status": "待发布",
+        },
+        "resolved": {
+            "v_status": "已解决",
+        },
+    },
+}
 
 
 class TapdError(RuntimeError):
@@ -192,20 +217,35 @@ def _auth_headers() -> dict[str, str]:
     )
 
 
-def _request_json(path: str, params: dict[str, Any]) -> dict[str, Any]:
+def _request_json(
+    path: str,
+    params: dict[str, Any],
+    *,
+    method: str = "GET",
+) -> dict[str, Any]:
     clean_params = {
         key: value
         for key, value in params.items()
         if value is not None and value != ""
     }
 
-    query = urllib.parse.urlencode(clean_params)
-    url = f"{TAPD_API_BASE}{path}?{query}"
+    method = method.upper()
+    headers = _auth_headers()
+
+    if method == "GET":
+        query = urllib.parse.urlencode(clean_params)
+        url = f"{TAPD_API_BASE}{path}?{query}"
+        data = None
+    else:
+        url = f"{TAPD_API_BASE}{path}"
+        data = urllib.parse.urlencode(clean_params).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
 
     req = urllib.request.Request(
         url,
-        headers=_auth_headers(),
-        method="GET",
+        data=data,
+        headers=headers,
+        method=method,
     )
 
     try:
@@ -321,6 +361,187 @@ def _fetch_comments(
     return [_normalize_comment(item) for item in data.get("data", [])]
 
 
+def _find_workflow_config(explicit_path: str | None = None) -> Path | None:
+    if explicit_path:
+        return Path(explicit_path).expanduser().resolve()
+
+    env_path = os.getenv("TAPD_WORKFLOW_CONFIG")
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+
+    for parent in [Path.cwd(), *Path.cwd().parents]:
+        candidate = parent / WORKFLOW_CONFIG_RELATIVE_PATH
+
+        if candidate.exists():
+            return candidate.resolve()
+
+    return None
+
+
+def _default_workflow_config_path() -> Path:
+    return (Path.cwd() / WORKFLOW_CONFIG_RELATIVE_PATH).resolve()
+
+
+def _load_workflow_config(
+    explicit_path: str | None = None,
+    *,
+    required: bool = True,
+) -> tuple[Path | None, dict[str, Any] | None]:
+    path = _find_workflow_config(explicit_path)
+
+    if path is None:
+        if required:
+            raise TapdError(
+                "Missing TAPD workflow config. Run "
+                "`tapd_bugs.py workflow init` from the project root, or pass "
+                "--workflow-config."
+            )
+        return None, None
+
+    if not path.exists():
+        raise TapdError(f"TAPD workflow config does not exist: {path}")
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            config = json.load(file)
+    except json.JSONDecodeError as exc:
+        raise TapdError(f"Invalid TAPD workflow config JSON: {path}") from exc
+
+    if not isinstance(config, dict):
+        raise TapdError(f"TAPD workflow config must be a JSON object: {path}")
+
+    return path, config
+
+
+def _workflow_read_config(config: dict[str, Any]) -> dict[str, Any]:
+    read_config = config.get("read", {})
+
+    if not isinstance(read_config, dict):
+        raise TapdError("TAPD workflow config field `read` must be an object.")
+
+    return read_config
+
+
+def _workflow_write_config(config: dict[str, Any]) -> dict[str, Any]:
+    write_config = config.get("write", {})
+
+    if not isinstance(write_config, dict):
+        raise TapdError("TAPD workflow config field `write` must be an object.")
+
+    return write_config
+
+
+def _apply_workflow_read_defaults(args: argparse.Namespace) -> dict[str, Any] | None:
+    if not getattr(args, "workflow", False):
+        return None
+
+    _, config = _load_workflow_config(args.workflow_config, required=True)
+    assert config is not None
+
+    read_config = _workflow_read_config(config)
+
+    if not args.status and read_config.get("status"):
+        args.status = str(read_config["status"])
+
+    if not args.v_status and read_config.get("v_status"):
+        args.v_status = str(read_config["v_status"])
+
+    if read_config.get("with_comments"):
+        args.with_comments = True
+
+    if args.comments_limit == 30 and read_config.get("comments_limit"):
+        args.comments_limit = int(read_config["comments_limit"])
+
+    if args.comments_page == 1 and read_config.get("comments_page"):
+        args.comments_page = int(read_config["comments_page"])
+
+    if (
+        args.comment_entry_type == DEFAULT_COMMENT_ENTRY_TYPE
+        and read_config.get("comment_entry_type")
+    ):
+        args.comment_entry_type = str(read_config["comment_entry_type"])
+
+    return config
+
+
+def _workflow_transition_fields(
+    config: dict[str, Any],
+    transition_name: str,
+) -> dict[str, Any]:
+    transitions = config.get("transitions", {})
+
+    if not isinstance(transitions, dict):
+        raise TapdError("TAPD workflow config field `transitions` must be an object.")
+
+    if transition_name not in transitions:
+        available = ", ".join(sorted(transitions))
+        raise TapdError(
+            f"Unknown TAPD workflow transition: {transition_name}. "
+            f"Available transitions: {available or '(none)'}."
+        )
+
+    transition = transitions[transition_name]
+
+    if isinstance(transition, str):
+        status_field = str(_workflow_write_config(config).get("status_field", "v_status"))
+        return {status_field: transition}
+
+    if not isinstance(transition, dict):
+        raise TapdError(
+            f"TAPD workflow transition `{transition_name}` must be an object or string."
+        )
+
+    fields = {
+        key: value
+        for key, value in transition.items()
+        if value is not None and value != ""
+    }
+
+    if not fields:
+        raise TapdError(f"TAPD workflow transition `{transition_name}` is empty.")
+
+    return fields
+
+
+def _add_current_user_field(
+    fields: dict[str, Any],
+    *,
+    current_user: str | None,
+    write_config: dict[str, Any] | None = None,
+) -> None:
+    if "current_user" in fields:
+        return
+
+    if current_user:
+        fields["current_user"] = current_user
+        return
+
+    env_name = "TAPD_CURRENT_USER"
+
+    if write_config and write_config.get("current_user_env"):
+        env_name = str(write_config["current_user_env"])
+
+    env_value = os.getenv(env_name)
+
+    if env_value:
+        fields["current_user"] = env_value
+
+
+def _update_bug_fields(
+    *,
+    workspace_id: str,
+    bug_id: str,
+    fields: dict[str, Any],
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "workspace_id": workspace_id,
+        "id": bug_id,
+    }
+    params.update(fields)
+
+    return _request_json("/bugs", params, method="POST")
+
+
 def list_bugs(args: argparse.Namespace) -> int:
     workspace_id = args.workspace_id or os.getenv("TAPD_WORKSPACE_ID")
 
@@ -330,6 +551,8 @@ def list_bugs(args: argparse.Namespace) -> int:
             "in the project .env file."
         )
 
+    _apply_workflow_read_defaults(args)
+
     params: dict[str, Any] = {
         "workspace_id": workspace_id,
         "limit": min(args.limit, 200),
@@ -337,6 +560,7 @@ def list_bugs(args: argparse.Namespace) -> int:
         "order": args.order,
         "fields": args.fields,
         "status": args.status,
+        "v_status": args.v_status,
         "title": args.title,
         "current_owner": args.owner,
         "severity": args.severity,
@@ -392,6 +616,17 @@ def get_bug(args: argparse.Namespace) -> int:
 
     if not args.bug_id:
         raise TapdError("Missing --bug-id.")
+
+    if getattr(args, "workflow", False):
+        _, config = _load_workflow_config(args.workflow_config, required=True)
+        assert config is not None
+        read_config = _workflow_read_config(config)
+
+        if read_config.get("with_comments"):
+            args.with_comments = True
+
+        if args.comments_limit == 200 and read_config.get("comments_limit"):
+            args.comments_limit = int(read_config["comments_limit"])
 
     params = {
         "workspace_id": workspace_id,
@@ -464,6 +699,174 @@ def get_comments(args: argparse.Namespace) -> int:
     return 0
 
 
+def update_bug_status(args: argparse.Namespace) -> int:
+    workspace_id = args.workspace_id or os.getenv("TAPD_WORKSPACE_ID")
+
+    if not workspace_id:
+        raise TapdError(
+            "Missing workspace id. Pass --workspace-id or set TAPD_WORKSPACE_ID "
+            "in the project .env file."
+        )
+
+    fields: dict[str, Any] = {
+        "status": args.status,
+        "v_status": args.v_status,
+    }
+
+    if args.keep_owner:
+        fields["keep_owner"] = "1"
+
+    fields = {
+        key: value
+        for key, value in fields.items()
+        if value is not None and value != ""
+    }
+
+    if not fields.get("status") and not fields.get("v_status"):
+        raise TapdError("Pass --status or --v-status to update a TAPD bug status.")
+
+    _add_current_user_field(fields, current_user=args.current_user)
+
+    data = _update_bug_fields(
+        workspace_id=workspace_id,
+        bug_id=args.bug_id,
+        fields=fields,
+    )
+
+    print(
+        json.dumps(
+            {
+                "workspace_id": workspace_id,
+                "bug_id": args.bug_id,
+                "updated_fields": fields,
+                "response": data.get("data", data),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+    return 0
+
+
+def transition_bug(args: argparse.Namespace) -> int:
+    workspace_id = args.workspace_id or os.getenv("TAPD_WORKSPACE_ID")
+
+    if not workspace_id:
+        raise TapdError(
+            "Missing workspace id. Pass --workspace-id or set TAPD_WORKSPACE_ID "
+            "in the project .env file."
+        )
+
+    path, config = _load_workflow_config(args.workflow_config, required=True)
+    assert config is not None
+
+    write_config = _workflow_write_config(config)
+
+    if not write_config.get("enabled", False) and not args.force:
+        raise TapdError(
+            "TAPD workflow write-back is disabled. Set write.enabled=true in "
+            f"{path}, or pass --force for this transition."
+        )
+
+    fields = _workflow_transition_fields(config, args.to)
+    _add_current_user_field(
+        fields,
+        current_user=args.current_user,
+        write_config=write_config,
+    )
+
+    data = _update_bug_fields(
+        workspace_id=workspace_id,
+        bug_id=args.bug_id,
+        fields=fields,
+    )
+
+    print(
+        json.dumps(
+            {
+                "workspace_id": workspace_id,
+                "bug_id": args.bug_id,
+                "workflow_config": str(path),
+                "transition": args.to,
+                "updated_fields": fields,
+                "response": data.get("data", data),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+    return 0
+
+
+def workflow_command(args: argparse.Namespace) -> int:
+    if args.workflow_command == "init":
+        target = (
+            Path(args.path).expanduser().resolve()
+            if args.path
+            else _default_workflow_config_path()
+        )
+
+        if target.exists() and not args.force:
+            raise TapdError(
+                f"TAPD workflow config already exists: {target}. "
+                "Pass --force to overwrite it."
+            )
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        with target.open("w", encoding="utf-8", newline="\n") as file:
+            json.dump(DEFAULT_WORKFLOW_CONFIG, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+
+        print(
+            json.dumps(
+                {
+                    "created": str(target),
+                    "workflow": DEFAULT_WORKFLOW_CONFIG,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+
+        return 0
+
+    if args.workflow_command == "show":
+        path, config = _load_workflow_config(args.path, required=True)
+        print(
+            json.dumps(
+                {
+                    "path": str(path),
+                    "workflow": config,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.workflow_command == "path":
+        path = _find_workflow_config(args.path)
+        default_path = _default_workflow_config_path()
+
+        print(
+            json.dumps(
+                {
+                    "path": str(path) if path else None,
+                    "exists": bool(path and path.exists()),
+                    "default_path": str(default_path),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    raise TapdError("Missing workflow command.")
+
+
 def get_image(args: argparse.Namespace) -> int:
     workspace_id = args.workspace_id or os.getenv("TAPD_WORKSPACE_ID")
 
@@ -525,6 +928,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help='Example: "new|in_progress|reopened"',
     )
+    list_parser.add_argument(
+        "--v-status",
+        default=None,
+        help='Display status name, for example "新|重新打开".',
+    )
     list_parser.add_argument("--title", default=None)
     list_parser.add_argument("--owner", default=None)
     list_parser.add_argument("--severity", default=None)
@@ -533,6 +941,12 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--limit", type=int, default=30)
     list_parser.add_argument("--page", type=int, default=1)
     list_parser.add_argument("--order", default="modified desc")
+    list_parser.add_argument(
+        "--workflow",
+        action="store_true",
+        help="Apply read defaults from the project TAPD workflow config.",
+    )
+    list_parser.add_argument("--workflow-config", default=None)
     list_parser.add_argument(
         "--with-comments",
         action="store_true",
@@ -556,6 +970,12 @@ def build_parser() -> argparse.ArgumentParser:
     get_parser.add_argument("--workspace-id", default=None)
     get_parser.add_argument("--bug-id", required=True)
     get_parser.add_argument(
+        "--workflow",
+        action="store_true",
+        help="Apply read defaults from the project TAPD workflow config.",
+    )
+    get_parser.add_argument("--workflow-config", default=None)
+    get_parser.add_argument(
         "--with-comments",
         action="store_true",
         help="Also fetch comments for this bug.",
@@ -575,6 +995,69 @@ def build_parser() -> argparse.ArgumentParser:
     comments_parser.add_argument("--page", type=int, default=1)
     comments_parser.add_argument("--comment-entry-type", default=DEFAULT_COMMENT_ENTRY_TYPE)
     comments_parser.set_defaults(func=get_comments)
+
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Update one TAPD bug status directly.",
+    )
+    status_parser.add_argument("--workspace-id", default=None)
+    status_parser.add_argument("--bug-id", required=True)
+    status_parser.add_argument("--status", default=None)
+    status_parser.add_argument(
+        "--v-status",
+        default=None,
+        help="Display status name, useful for customized TAPD workflows.",
+    )
+    status_parser.add_argument("--current-user", default=None)
+    status_parser.add_argument("--keep-owner", action="store_true")
+    status_parser.set_defaults(func=update_bug_status)
+
+    transition_parser = subparsers.add_parser(
+        "transition",
+        help="Update one TAPD bug using a configured workflow transition.",
+    )
+    transition_parser.add_argument("--workspace-id", default=None)
+    transition_parser.add_argument("--bug-id", required=True)
+    transition_parser.add_argument("--to", required=True)
+    transition_parser.add_argument("--workflow-config", default=None)
+    transition_parser.add_argument("--current-user", default=None)
+    transition_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow transition even when write.enabled is false.",
+    )
+    transition_parser.set_defaults(func=transition_bug)
+
+    workflow_parser = subparsers.add_parser(
+        "workflow",
+        help="Create or inspect the project TAPD workflow config.",
+    )
+    workflow_subparsers = workflow_parser.add_subparsers(
+        dest="workflow_command",
+        required=True,
+    )
+
+    workflow_init_parser = workflow_subparsers.add_parser(
+        "init",
+        help="Create .agents/tapd-bug-autofix.workflow.json.",
+    )
+    workflow_init_parser.add_argument("--path", default=None)
+    workflow_init_parser.add_argument("--force", action="store_true")
+    workflow_init_parser.set_defaults(func=workflow_command)
+
+    workflow_show_parser = workflow_subparsers.add_parser(
+        "show",
+        help="Print the active TAPD workflow config.",
+    )
+    workflow_show_parser.add_argument("--path", default=None)
+    workflow_show_parser.set_defaults(func=workflow_command)
+
+    workflow_path_parser = workflow_subparsers.add_parser(
+        "path",
+        help="Print the resolved TAPD workflow config path.",
+    )
+    workflow_path_parser.add_argument("--path", default=None)
+    workflow_path_parser.set_defaults(func=workflow_command)
 
     image_parser = subparsers.add_parser(
         "image",
